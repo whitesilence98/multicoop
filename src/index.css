@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply font-mono bg-canvas text-text-primary antialiased;
+  /* Diagonal stripe texture over the canvas */
+  background-image: repeating-linear-gradient(
+    45deg,
+    #0c0e17,
+    #0c0e17 10px,
+    #0e101b 10px,
+    #0e101b 20px
+  );
+}
+
+/* ---- shared primitives ---------------------------------------------------- */
+
+@layer components {
+  /* Section headers: UPPERCASE tracking-wide metric titles */
+  .section-title {
+    @apply font-mono uppercase tracking-wider text-xs font-bold text-neon;
+  }
+
+  .panel {
+    @apply rounded-lg border border-edge bg-panel p-4;
+  }
+
+  .btn-primary {
+    @apply font-mono uppercase tracking-wider text-xs font-bold rounded-lg px-4 py-2
+      bg-glow-dim text-white border border-glow transition-colors
+      hover:bg-glow focus:outline-none focus:ring-2 focus:ring-glow focus:ring-offset-2
+      focus:ring-offset-canvas disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply font-mono uppercase tracking-wider text-xs font-bold rounded-lg px-3 py-1.5
+      text-text-primary border border-edge-bright bg-inset transition-colors
+      hover:border-glow hover:text-white
+      focus:outline-none focus:ring-2 focus:ring-glow disabled:opacity-40;
+  }
+
+  .field {
+    @apply font-mono text-sm rounded-lg border border-edge bg-inset px-3 py-2 text-text-primary
+      placeholder:text-text-muted focus:outline-none focus:border-glow
+      focus:ring-2 focus:ring-glow/40;
+  }
+
+  .chip {
+    @apply font-mono uppercase tracking-wider text-[10px] font-bold rounded px-1.5 py-0.5 border;
+  }
+}
+
+/* Terminal scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0b12;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2f45;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #4f46e5;
+}

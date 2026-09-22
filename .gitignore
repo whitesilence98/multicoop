@@ -1,0 +1,22 @@
+# Node
+node_modules/
+dist/
+dist-electron/
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+backend/dist/
+backend/build/
+*.spec
+
+# Local data & secrets
+data/
+.env
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
