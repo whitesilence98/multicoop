@@ -1,5 +1,10 @@
 /// <reference types="vite/client" />
 
+interface AiEmployerBridge {
+  pickDirectory: () => Promise<string | null>;
+  notify: (title: string, body: string) => void;
+}
+
 /** Bridge exposed by electron/preload.ts */
 interface ElectronAPI {
   minimize: () => void;
@@ -9,4 +14,5 @@ interface ElectronAPI {
 
 interface Window {
   electronAPI?: ElectronAPI;
+  aiemployer?: AiEmployerBridge;
 }

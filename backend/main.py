@@ -9,6 +9,8 @@ Endpoints:
   POST /api/tasks/{id}/approve      human-in-the-loop approval verdicts
   GET  /api/metrics                 queue depth + token bucket snapshots
   GET  /api/usage                   aggregate token usage
+  POST /api/chat/login              team-chat session (see routes/chat.py)
+  WS   /api/chat/ws                 live team chat + @mentions
 """
 from __future__ import annotations
 
@@ -23,11 +25,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
+from sqlalchemy import select
 
 from backend.agent_runner import EventSink, make_client, run_agent
-from backend.db import DB, Agent, Task, event_to_dict
+from backend.db import DB, Agent, Task, event_to_dict, utcnow
 from backend.rate_limiter import Orchestrator, RunRequest
 from backend.routes.settings import router as settings_router
+from backend.routes.chat import router as chat_router
 from backend.tools import ApprovalRequired, build_default_registry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -97,8 +101,6 @@ class SSEHub(EventSink):
 
 async def _run_handler(req: RunRequest) -> dict[str, int]:
     """Orchestrator callback: execute one task run end-to-end."""
-    from backend.db import utcnow
-
     async with db.session() as s:
         task = await s.get(Task, req.task_id)
         agent = await s.get(Agent, req.agent_id) if req.agent_id else None
@@ -112,11 +114,7 @@ async def _run_handler(req: RunRequest) -> dict[str, int]:
             "permission_level": agent.permission_level if agent else "standard",
             "allowed_tools": agent.allowed_tools if agent else list(registry.tools.keys()),
         }
-        task_snapshot = {
-            "id": task.id,
-            "description": task.description,
-            "title": task.title,
-        }
+        task_snapshot = {"id": task.id, "description": task.description, "title": task.title}
         await s.commit()
 
     hub = SSEHub(req.task_id, agent_snapshot["id"])
@@ -135,23 +133,53 @@ async def _run_handler(req: RunRequest) -> dict[str, int]:
         )
         await db.record_usage(req.task_id, usage["input_tokens"], usage["output_tokens"])
         result_text = ""
-        async with db.session() as s:
-            for ev in await db.list_events(req.task_id):
-                if ev.kind == "text_delta":
-                    result_text += ev.payload.get("text", "")
+        for ev in await db.list_events(req.task_id):
+            if ev.kind == "text_delta":
+                result_text += ev.payload.get("text", "")
         await db.update_task(
-            req.task_id,
-            status="done",
-            finished_at=utcnow(),
-            result=result_text[-8000:] or None,
+            req.task_id, status="done", finished_at=utcnow(), result=result_text[-8000:] or None
         )
         await hub.emit("run_finished", {"status": "done"})
+        await _broadcast_task_done(req.task_id, "done", result_text)
         return usage
     except Exception as e:  # noqa: BLE001
         log.exception("task %s failed", req.task_id)
         await hub.emit("run_failed", {"error": str(e)})
         await db.update_task(req.task_id, status="failed", finished_at=utcnow())
+        await _broadcast_task_done(req.task_id, "failed", str(e))
         return {"input_tokens": 0, "output_tokens": 0}
+
+
+async def _broadcast_task_done(task_id: int, status: str, text: str) -> None:
+    """If this run came from a chat @mention, post the answer back into chat."""
+    from backend.routes import chat as chat_mod
+
+    async with db.session() as s:
+        task = await s.get(Task, task_id)
+        if not task or not task.title.startswith("chat:"):
+            return
+        agent = await s.get(Agent, task.agent_id) if task.agent_id else None
+
+    if agent is None:
+        return
+    await chat_mod.manager.broadcast(
+        {
+            "type": "message",
+            "id": f"m_{asyncio.get_running_loop().time():.0f}",
+            "sender": {
+                "id": f"agent_{agent.id}",
+                "username": agent.name,
+                "role": "AI Agent",
+                "badge": "BOT",
+                "color": agent.color,
+                "kind": "bot",
+                "status": "online",
+            },
+            "text": text or "(no output)",
+            "mentions": [],
+            "ts": utcnow().isoformat(timespec="seconds"),
+        }
+    )
 
 
 # ---- lifecycle -----------------------------------------------------------------
@@ -200,7 +228,7 @@ async def _seed_default_agents() -> None:
     from sqlalchemy import func
 
     async with db.session() as s:
-        count = (await s.execute(_select(func.count(Agent.id)))).scalar() or 0
+        count = (await s.execute(select(func.count(Agent.id)))).scalar() or 0
         if count > 0:
             return
         for spec in DEFAULT_AGENTS:
@@ -216,13 +244,74 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await _seed_default_agents()
     orchestrator = Orchestrator(run_handler=_run_handler, rpm=50, itpm=200_000, otpm=80_000, workers=4)
     await orchestrator.start()
+
+    # Wire chat hooks so routes/chat.py never imports main (circular import).
+    from backend.routes import chat as chat_mod
+
+    def _dispatch(agent_row: dict, text: str, client_id: str) -> None:
+        _enqueue_chat_task(agent_row, text, client_id)
+
+    chat_mod.hooks["db"] = db
+    chat_mod.hooks["get_agent_by_name"] = _agent_row_by_name
+    chat_mod.hooks["dispatch_agent_chat_task"] = _dispatch
+
     log.info("orchestrator online; workspace=%s", WORKSPACE)
     yield
     await orchestrator.stop()
 
 
+# ---- chat wiring helpers ---------------------------------------------------------
+
+async def _agent_row_by_name(name: str) -> dict | None:
+    """Look up an agent by exact name (used by @mentions in chat)."""
+    async with db.session() as s:
+        rows = (await s.execute(select(Agent).where(Agent.name == name))).scalars().all()
+        if not rows:
+            return None
+        a = rows[0]
+        return {
+            "id": a.id,
+            "name": a.name,
+            "persona": a.persona,
+            "allowed_tools": a.allowed_tools,
+            "color": a.color,
+        }
+
+
+def _enqueue_chat_task(agent_row: dict, text: str, client_id: str) -> None:
+    """Synthesize a Task from a chat @mention and submit it to the queue."""
+
+    async def _go() -> None:
+        async with db.session() as s:
+            t = Task(
+                title=f"chat: {text[:60]}",
+                description=(
+                    f"{text}\n\n(You were @mentioned in team chat by the Project "
+                    f"Director. Reply with your answer — it will be posted to chat.)"
+                ),
+                agent_id=agent_row["id"],
+                status="pending",
+                priority=10,
+            )
+            s.add(t)
+            await s.commit()
+        if orchestrator is not None:
+            await orchestrator.submit(
+                RunRequest(
+                    task_id=t.id,
+                    agent_id=agent_row["id"],
+                    est_input_tokens=4_000,
+                    est_output_tokens=2_000,
+                    meta={"source": "chat", "client_id": client_id},
+                )
+            )
+
+    asyncio.get_running_loop().create_task(_go())
+
+
 app = FastAPI(title="AI Employer Orchestrator", lifespan=lifespan)
 app.include_router(settings_router)
+app.include_router(chat_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],  # Vite dev server
@@ -256,13 +345,10 @@ async def health() -> dict[str, Any]:
     return {"status": "ok", "version": "0.1.0"}
 
 
-from sqlalchemy import select as _select  # noqa: E402
-
-
 @app.get("/api/agents")
 async def list_agents() -> list[dict[str, Any]]:
     async with db.session() as s:
-        rows = (await s.execute(_select(Agent))).scalars().all()
+        rows = (await s.execute(select(Agent))).scalars().all()
     return [_agent_dict(a) for a in rows]
 
 
@@ -298,8 +384,6 @@ async def delete_agent(agent_id: int) -> dict[str, str]:
 
 @app.get("/api/tasks")
 async def list_tasks() -> list[dict[str, Any]]:
-    from sqlalchemy import select
-
     async with db.session() as s:
         rows = (await s.execute(select(Task).order_by(Task.priority.desc(), Task.id))).scalars().all()
     return [_task_dict(t) for t in rows]
@@ -400,7 +484,7 @@ async def metrics() -> dict[str, Any]:
 
 @app.get("/api/usage")
 async def usage() -> dict[str, Any]:
-    from sqlalchemy import func, select
+    from sqlalchemy import func
 
     async with db.session() as s:
         row = (await s.execute(select(func.sum(Task.input_tokens), func.sum(Task.output_tokens)))).one()

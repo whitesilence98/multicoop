@@ -7,15 +7,17 @@ import Dashboard from "./components/Dashboard";
 import AgentStudio from "./components/AgentStudio";
 import TaskBoard from "./components/TaskBoard";
 import AgentTerminal from "./components/AgentTerminal";
+import TeamChat from "./components/TeamChat";
 import SettingsPanel from "./components/SettingsPanel";
 
-type View = "dashboard" | "studio" | "board" | "terminal";
+type View = "dashboard" | "studio" | "board" | "terminal" | "chat";
 
 const NAV: { id: View; label: string }[] = [
   { id: "dashboard", label: "Control" },
   { id: "board", label: "Tasks" },
   { id: "studio", label: "Studio" },
   { id: "terminal", label: "Terminal" },
+  { id: "chat", label: "Chat" },
 ];
 
 export default function App() {
@@ -86,6 +88,7 @@ export default function App() {
         {view === "board" && <TaskBoard />}
         {view === "studio" && <AgentStudio />}
         {view === "terminal" && <AgentTerminal />}
+        {view === "chat" && <TeamChat />}
       </main>
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
