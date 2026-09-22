@@ -150,13 +150,24 @@ async def run_agent(
     emitter: EventSink,
     workspace: Path,
     settings_model: str | None = None,
+    client_factory: Any = None,
 ) -> dict[str, int]:
     """Run one task through the agentic loop. Returns actual token usage.
 
-    `settings_model` overrides the default model when the user configured one
-    in the settings panel."""
+    Model resolution order: agent's pinned `model` (assigned in Studio) →
+    `settings_model` (settings panel) → MODEL env/default.
+    `client_factory`, when given, is called with the resolved model and may
+    return a different client (per-agent provider routing)."""
     api_tools = tools_registry.to_api_schema()
     system = build_system(agent.get("persona") or agent.get("system_prompt") or "")
+
+    # ---- model + client resolution (per-agent override) ------------------
+    agent_model = (agent.get("model") or "").strip() or None
+    resolved_model = agent_model or settings_model or MODEL
+    if client_factory is not None:
+        # Per-agent provider routing: the factory rebuilds the client (e.g.
+        # different base_url/api_key) for the resolved model.
+        client = client_factory(resolved_model) or client
 
     messages: list[dict[str, Any]] = [
         {
@@ -179,7 +190,7 @@ async def run_agent(
             break
 
         payload: dict[str, Any] = {
-            "model": settings_model or MODEL,
+            "model": resolved_model,
             "max_tokens": MAX_TOKENS,
             "system": system,
             "tools": api_tools,

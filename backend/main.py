@@ -31,6 +31,7 @@ from backend.agent_runner import EventSink, make_client, run_agent
 from backend.db import DB, Agent, Task, event_to_dict, utcnow
 from backend.rate_limiter import Orchestrator, RunRequest
 from backend.routes.settings import router as settings_router
+from backend.routes.providers import router as providers_router
 from backend.routes.chat import router as chat_router
 from backend.tools import ApprovalRequired, build_default_registry
 
@@ -63,7 +64,22 @@ WORKSPACE.mkdir(exist_ok=True)
 
 db = DB(DATA_DIR / "aiemployer.db")
 registry = build_default_registry()
-client = make_client()
+client = make_client()  # import-time fallback; rebuilt from settings in lifespan
+
+
+async def _runtime_client() -> Any:
+    """The active API client, rebuilt from saved settings (key/base-url).
+
+    The settings panel writes its config to the DB; this reads it back so
+    chat/task runs always follow the panel (e.g. Ollama cloud) instead of the
+    import-time default. Falls back to the module-level client when the DB
+    has nothing stored or the panel config is Anthropic-default."""
+    from backend.routes.settings import _load_raw
+
+    saved = await _load_raw(db)
+    if saved and (saved.get("base_url") or saved.get("api_key")):
+        return make_client(saved)
+    return client
 
 
 # ---- SSE hub + approval gate ---------------------------------------------------
@@ -113,6 +129,8 @@ async def _run_handler(req: RunRequest) -> dict[str, int]:
             "persona": agent.persona if agent else "You are a general-purpose assistant.",
             "permission_level": agent.permission_level if agent else "standard",
             "allowed_tools": agent.allowed_tools if agent else list(registry.tools.keys()),
+            "provider_id": agent.provider_id if agent else "default",
+            "model": agent.model if agent else None,
         }
         task_snapshot = {"id": task.id, "description": task.description, "title": task.title}
         await s.commit()
@@ -120,16 +138,25 @@ async def _run_handler(req: RunRequest) -> dict[str, int]:
     hub = SSEHub(req.task_id, agent_snapshot["id"])
     await hub.emit("run_started", {"task": task_snapshot["title"]})
     try:
-        # Honor the model configured in the settings panel, if any.
+        # Honor the model + provider configured in the settings panel, if any.
         from backend.routes.settings import _load_raw
 
         saved = await _load_raw(db)
         settings_model = (saved.get("model") or "").strip() or None
+        run_client = await _runtime_client()
+
+        def _client_factory(resolved_model: str):
+            """Per-agent provider routing. provider_id "default" keeps the
+            runtime client (env/panel config); any other provider_id will
+            rebuild from that provider's stored config once multi-provider
+            lands."""
+            return None  # keep the existing client for "default"
 
         tools = registry.to_api_schema(agent_snapshot["allowed_tools"])
         usage = await run_agent(
-            client, registry, agent_snapshot, task_snapshot, hub, WORKSPACE,
+            run_client, registry, agent_snapshot, task_snapshot, hub, WORKSPACE,
             settings_model=settings_model,
+            client_factory=_client_factory if agent_snapshot.get("model") else None,
         )
         await db.record_usage(req.task_id, usage["input_tokens"], usage["output_tokens"])
         result_text = ""
@@ -275,6 +302,8 @@ async def _agent_row_by_name(name: str) -> dict | None:
             "persona": a.persona,
             "allowed_tools": a.allowed_tools,
             "color": a.color,
+            "provider_id": a.provider_id or "default",
+            "model": a.model,
         }
 
 
@@ -311,6 +340,7 @@ def _enqueue_chat_task(agent_row: dict, text: str, client_id: str) -> None:
 
 app = FastAPI(title="AI Employer Orchestrator", lifespan=lifespan)
 app.include_router(settings_router)
+app.include_router(providers_router)
 app.include_router(chat_router)
 app.add_middleware(
     CORSMiddleware,
@@ -328,6 +358,8 @@ class AgentIn(BaseModel):
     permission_level: str = Field(default="standard", pattern="^(readonly|standard|elevated)$")
     allowed_tools: list[str] = Field(default_factory=lambda: ["read_file", "write_file", "list_dir"])
     color: str = "#6366F1"
+    provider_id: str = "default"       # "default" = runtime settings provider
+    model: str | None = None           # None = provider's configured model
 
 
 class TaskIn(BaseModel):
@@ -360,6 +392,8 @@ def _agent_dict(a: Agent) -> dict[str, Any]:
         "permission_level": a.permission_level,
         "allowed_tools": a.allowed_tools,
         "color": a.color,
+        "provider_id": a.provider_id or "default",
+        "model": a.model,
     }
 
 
@@ -368,6 +402,33 @@ async def create_agent(body: AgentIn) -> dict[str, Any]:
     async with db.session() as s:
         a = Agent(**body.model_dump())
         s.add(a)
+        await s.commit()
+        return _agent_dict(a)
+
+
+@app.put("/api/agents/{agent_id}")
+async def update_agent(agent_id: int, body: AgentIn) -> dict[str, Any]:
+    async with db.session() as s:
+        a = await s.get(Agent, agent_id)
+        if not a:
+            raise HTTPException(404, "agent not found")
+        for k, v in body.model_dump().items():
+            setattr(a, k, v)
+        await s.commit()
+        return _agent_dict(a)
+
+
+@app.patch("/api/agents/{agent_id}")
+async def patch_agent(agent_id: int, body: dict[str, Any]) -> dict[str, Any]:
+    """Partial update — used by the studio's inline model selector."""
+    allowed = {"persona", "permission_level", "allowed_tools", "color", "provider_id", "model"}
+    async with db.session() as s:
+        a = await s.get(Agent, agent_id)
+        if not a:
+            raise HTTPException(404, "agent not found")
+        for k, v in body.items():
+            if k in allowed:
+                setattr(a, k, v)
         await s.commit()
         return _agent_dict(a)
 

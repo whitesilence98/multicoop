@@ -39,6 +39,7 @@ class SettingsIn(BaseModel):
     model: str = "claude-opus-5"
     timeout_seconds: int = Field(default=120, ge=5, le=600)
     max_retries: int = Field(default=3, ge=0, le=10)
+    added_models: list[str] | None = None  # None => keep existing
     proxy: ProxyIn | None = None
 
 
@@ -48,6 +49,7 @@ class SettingsOut(BaseModel):
     model: str
     timeout_seconds: int
     max_retries: int
+    added_models: list[str] = Field(default_factory=list)
     proxy: dict
     has_api_key: bool
     api_key_preview: str  # e.g. "sk-ant-a…9f2e" — never the full key
@@ -98,6 +100,13 @@ def _resolved(settings: dict, incoming: SettingsIn) -> dict:
     out["model"] = incoming.model
     out["timeout_seconds"] = incoming.timeout_seconds
     out["max_retries"] = incoming.max_retries
+    if incoming.added_models is not None:
+        # Dedupe + drop empties; order preserved for stable UI rendering.
+        seen: set[str] = set()
+        out["added_models"] = [
+            m for m in (x.strip() for x in incoming.added_models)
+            if m and not (m in seen or seen.add(m))
+        ]
     if incoming.api_key is not None and incoming.api_key.strip():
         out["api_key"] = incoming.api_key.strip()
     if incoming.proxy is not None:
@@ -122,6 +131,7 @@ def _to_out(settings: dict) -> SettingsOut:
         model=settings.get("model") or "claude-opus-5",
         timeout_seconds=settings.get("timeout_seconds") or 120,
         max_retries=settings.get("max_retries") or 3,
+        added_models=list(settings.get("added_models") or []),
         proxy=settings.get("proxy") or {"enabled": False},
         has_api_key=bool(key),
         api_key_preview=_mask(key),
@@ -154,7 +164,14 @@ async def test_connection(body: SettingsIn) -> TestResult:
     from backend.main import db
 
     stored = await _load_raw(db)
-    key = (body.api_key or "").strip() or (stored.get("api_key") or "")
+    import os
+
+    key = (
+        (body.api_key or "").strip()
+        or (stored.get("api_key") or "").strip()
+        or (os.environ.get("OLLAMA_API_KEY") or "").strip()
+        or (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    )
     if not key:
         raise HTTPException(400, "no api key provided or saved")
 
@@ -169,7 +186,13 @@ async def test_connection(body: SettingsIn) -> TestResult:
     started = time.monotonic()
     try:
         async with make_httpx_client(settings) as hx:
-            headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+            # Both auth styles: x-api-key for Anthropic proper, Bearer for
+            # Ollama cloud / OpenAI-compatible gateways.
+            headers = {
+                "x-api-key": key,
+                "Authorization": f"Bearer {key}",
+                "anthropic-version": "2023-06-01",
+            }
             url = (settings.get("base_url") or "https://api.anthropic.com").rstrip("/") + "/v1/models"
             # Client-level timeout applies (httpx2 rejects Timeout objects at
             # the per-request level).
@@ -202,14 +225,25 @@ async def fetch_models(body: SettingsIn) -> ModelList:
     from backend.main import db
 
     stored = await _load_raw(db)
-    key = (body.api_key or "").strip() or (stored.get("api_key") or "")
+    import os
+
+    key = (
+        (body.api_key or "").strip()
+        or (stored.get("api_key") or "").strip()
+        or (os.environ.get("OLLAMA_API_KEY") or "").strip()
+        or (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    )
     if not key:
         raise HTTPException(400, "no api key provided or saved")
 
     settings = _resolved(stored, body)
     try:
         async with make_httpx_client(settings) as hx:
-            headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+            headers = {
+                "x-api-key": key,
+                "Authorization": f"Bearer {key}",
+                "anthropic-version": "2023-06-01",
+            }
             url = (settings.get("base_url") or "https://api.anthropic.com").rstrip("/") + "/v1/models"
             resp = await hx.get(url, headers=headers)
             if resp.status_code == 200:

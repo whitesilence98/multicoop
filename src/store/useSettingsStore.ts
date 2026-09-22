@@ -16,6 +16,7 @@ export interface RuntimeSettings {
   model: string;
   timeout_seconds: number;
   max_retries: number;
+  added_models: string[]; // persisted chip list (fetched + manual)
   proxy: ProxySettings;
 }
 
@@ -27,6 +28,7 @@ export interface SettingsOut {
   model: string;
   timeout_seconds: number;
   max_retries: number;
+  added_models: string[];
   proxy: {
     enabled: boolean;
     protocol: string;
@@ -70,6 +72,8 @@ interface SettingsState {
   save: () => Promise<boolean>;
   testConnection: () => Promise<void>;
   fetchModels: () => Promise<void>;
+  addModel: (m: string) => void;
+  removeModel: (m: string) => void;
   update: (patch: Partial<RuntimeSettings>) => void;
   updateProxy: (patch: Partial<ProxySettings>) => void;
 }
@@ -81,6 +85,7 @@ const DEFAULT_FORM: RuntimeSettings = {
   model: "claude-opus-5",
   timeout_seconds: 120,
   max_retries: 3,
+  added_models: [],
   proxy: {
     enabled: false,
     protocol: "http",
@@ -129,6 +134,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           model: s.model,
           timeout_seconds: s.timeout_seconds,
           max_retries: s.max_retries,
+          added_models: s.added_models ?? [],
           proxy: {
             enabled: s.proxy?.enabled ?? false,
             protocol: (s.proxy?.protocol as ProxySettings["protocol"]) || "http",
@@ -188,10 +194,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   fetchModels: async () => {
     set({ fetchStatus: "fetching", fetchDetail: "", models: [] });
     try {
-      const r = await req<{ models: string[]; detail: string }>("/settings/models", {
-        method: "POST",
-        body: JSON.stringify(get().form),
-      });
+      const { base_url, api_key } = get().form;
+      const r = await req<{ models: string[]; url: string; detail: string }>(
+        "/providers/fetch-models",
+        {
+          method: "POST",
+          body: JSON.stringify({ base_url, api_key: api_key || undefined }),
+        }
+      );
       set({
         fetchStatus: r.models.length > 0 ? "ok" : "failed",
         models: r.models,
@@ -201,6 +211,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({ fetchStatus: "failed", fetchDetail: String(e) });
     }
   },
+
+  addModel: (m) =>
+    set((s) => {
+      const name = m.trim();
+      if (!name || s.form.added_models.includes(name)) return s;
+      return { form: { ...s.form, added_models: [...s.form.added_models, name] } };
+    }),
+
+  removeModel: (m) =>
+    set((s) => ({
+      form: { ...s.form, added_models: s.form.added_models.filter((x) => x !== m) },
+    })),
 
   update: (patch) => set((s) => ({ form: { ...s.form, ...patch } })),
   updateProxy: (patch) =>

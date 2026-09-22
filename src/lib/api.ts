@@ -7,6 +7,8 @@ export interface Agent {
   permission_level: "readonly" | "standard" | "elevated";
   allowed_tools: string[];
   color: string;
+  provider_id: string;
+  model: string | null;
 }
 
 export interface Task {
@@ -44,6 +46,10 @@ export const api = {
   listAgents: () => req<Agent[]>("/agents"),
   createAgent: (body: Partial<Agent>) =>
     req<Agent>("/agents", { method: "POST", body: JSON.stringify(body) }),
+  updateAgent: (id: number, body: Partial<Agent>) =>
+    req<Agent>(`/agents/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  patchAgent: (id: number, body: Partial<Agent>) =>
+    req<Agent>(`/agents/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteAgent: (id: number) => req<never>(`/agents/${id}`, { method: "DELETE" }),
 
   listTasks: () => req<Task[]>("/tasks"),

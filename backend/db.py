@@ -32,6 +32,11 @@ class Agent(Base):
     permission_level: Mapped[str] = mapped_column(String(20), default="standard")  # readonly|standard|elevated
     allowed_tools: Mapped[list] = mapped_column(JSON, default=list)  # ["read_file", "write_file", ...]
     color: Mapped[str] = mapped_column(String(9), default="#6366F1")
+    # Model routing: which model this agent runs on. "default" (or None) means
+    # the runtime provider's configured model; a specific id (e.g.
+    # "qwen3.5:397b") pins the agent to that model on the provider endpoint.
+    provider_id: Mapped[str | None] = mapped_column(String(50), nullable=True, default="default")
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     is_active: Mapped[bool] = mapped_column(default=True)
 
@@ -82,6 +87,25 @@ class DB:
     async def init(self) -> None:
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            # Lightweight column migration: create_all only creates missing
+            # TABLES, never missing COLUMNS on existing ones.
+            await self._migrate(conn)
+
+    async def _migrate(self, conn) -> None:
+        """Add columns introduced after the first schema version."""
+        import sqlalchemy
+
+        migrations = [
+            ("agents", "provider_id", "VARCHAR(50)"),
+            ("agents", "model", "VARCHAR(120)"),
+        ]
+        for table, column, col_type in migrations:
+            # SQLite: check existing columns, ALTER only when absent. The
+            # probe SELECT itself raises when the column is missing.
+            try:
+                await conn.execute(sqlalchemy.text(f"SELECT {column} FROM {table} LIMIT 1"))
+            except Exception:  # noqa: BLE001 — column doesn't exist yet
+                await conn.execute(sqlalchemy.text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
 
     def session(self) -> AsyncSession:
         return self.session_factory()

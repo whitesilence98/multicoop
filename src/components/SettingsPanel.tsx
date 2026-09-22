@@ -39,12 +39,14 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
   const {
     form, hasApiKey, apiKeyPreview, loading, saving, error, savedAt,
     testStatus, testResult, models, fetchStatus, fetchDetail,
-    load, save, testConnection, fetchModels, update, updateProxy,
+    load, save, testConnection, fetchModels, addModel, removeModel,
+    update, updateProxy,
   } = useSettingsStore();
 
   const [showKey, setShowKey] = useState(false);
   const [showProxyPassword, setShowProxyPassword] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<null | "ok" | "error">(null);
+  const [customModel, setCustomModel] = useState("");
 
   useEffect(() => {
     load();
@@ -210,8 +212,21 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
         {/* ---------- runtime defaults ---------- */}
         <div className="mt-5 grid grid-cols-3 gap-3">
           <div className="col-span-3">
-            <div className="flex items-center justify-between">
-              <Label>Model</Label>
+            <Label>Model</Label>
+            <input
+              className="field w-full mt-1"
+              list="model-options"
+              value={form.model}
+              onChange={(e) => update({ model: e.target.value })}
+            />
+            <datalist id="model-options">
+              {(models.length > 0 ? models : [...form.added_models, ...MODEL_OPTIONS]).map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+
+            {/* ---- fetch action row ---- */}
+            <div className="flex items-center gap-3 mt-2">
               <button
                 className="flex items-center gap-1.5 text-xs uppercase tracking-wider font-bold text-text-muted hover:text-neon transition-colors disabled:opacity-40"
                 onClick={fetchModels}
@@ -223,30 +238,87 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
                 ) : (
                   <RefreshCw size={12} />
                 )}
-                Fetch Models
+                Fetch models
+              </button>
+              <span className="text-[10px] text-text-muted truncate">
+                {fetchStatus === "ok" && models.length > 0
+                  ? `✓ ${models.length} models`
+                  : fetchStatus === "failed" && fetchDetail
+                  ? `✗ ${fetchDetail}`
+                  : `from ${form.base_url.replace(/\/+$/, "")}/v1/models`}
+              </span>
+            </div>
+
+            {/* ---- fetched catalog: click a chip to add it ---- */}
+            {models.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+                {models.map((m) => {
+                  const added = form.added_models.includes(m);
+                  return (
+                    <button
+                      key={m}
+                      className={`chip transition-colors ${
+                        added
+                          ? "text-glow border-glow"
+                          : "text-text-muted border-edge-bright hover:text-neon hover:border-neon-dim"
+                      }`}
+                      onClick={() => addModel(m)}
+                      title={added ? "already added" : "click to add"}
+                    >
+                      {m}{added ? " ✓" : " +"}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ---- added-models chips ---- */}
+            {form.added_models.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {form.added_models.map((m) => (
+                  <span
+                    key={m}
+                    className="chip flex items-center gap-1 text-neon border-neon-dim"
+                  >
+                    {m}
+                    <button
+                      className="hover:text-red-400 transition-colors"
+                      onClick={() => removeModel(m)}
+                      title={`Remove ${m}`}
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* ---- manual add (for offline endpoints) ---- */}
+            <div className="mt-2 flex gap-2">
+              <input
+                className="field flex-1 text-xs"
+                placeholder="add model manually (e.g. qwen3.5:397b)…"
+                value={customModel}
+                onChange={(e) => setCustomModel(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addModel(customModel);
+                    setCustomModel("");
+                  }
+                }}
+              />
+              <button
+                className="btn-ghost"
+                onClick={() => {
+                  addModel(customModel);
+                  setCustomModel("");
+                }}
+                disabled={!customModel.trim()}
+              >
+                Add
               </button>
             </div>
-            <input
-              className="field w-full mt-1"
-              list="model-options"
-              value={form.model}
-              onChange={(e) => update({ model: e.target.value })}
-            />
-            <datalist id="model-options">
-              {(models.length > 0 ? models : MODEL_OPTIONS).map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
-            {fetchStatus === "ok" && models.length > 0 && (
-              <div className="text-[10px] uppercase tracking-wider text-neon mt-1">
-                ✓ {models.length} models available
-              </div>
-            )}
-            {fetchStatus === "failed" && fetchDetail && (
-              <div className="text-[10px] uppercase tracking-wider text-red-400 mt-1">
-                ✗ {fetchDetail}
-              </div>
-            )}
           </div>
           <div>
             <Label>Timeout (s)</Label>
