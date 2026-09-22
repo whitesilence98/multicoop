@@ -67,6 +67,13 @@ class EventLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class Setting(Base):
+    __tablename__ = "settings"
+
+    key: Mapped[str] = mapped_column(String(50), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
 class DB:
     def __init__(self, db_path: Path) -> None:
         self.engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")

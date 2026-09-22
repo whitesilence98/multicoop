@@ -27,6 +27,7 @@ from sse_starlette.sse import EventSourceResponse
 from backend.agent_runner import EventSink, make_client, run_agent
 from backend.db import DB, Agent, Task, event_to_dict
 from backend.rate_limiter import Orchestrator, RunRequest
+from backend.routes.settings import router as settings_router
 from backend.tools import ApprovalRequired, build_default_registry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -121,8 +122,17 @@ async def _run_handler(req: RunRequest) -> dict[str, int]:
     hub = SSEHub(req.task_id, agent_snapshot["id"])
     await hub.emit("run_started", {"task": task_snapshot["title"]})
     try:
+        # Honor the model configured in the settings panel, if any.
+        from backend.routes.settings import _load_raw
+
+        saved = await _load_raw(db)
+        settings_model = (saved.get("model") or "").strip() or None
+
         tools = registry.to_api_schema(agent_snapshot["allowed_tools"])
-        usage = await run_agent(client, registry, agent_snapshot, task_snapshot, hub, WORKSPACE)
+        usage = await run_agent(
+            client, registry, agent_snapshot, task_snapshot, hub, WORKSPACE,
+            settings_model=settings_model,
+        )
         await db.record_usage(req.task_id, usage["input_tokens"], usage["output_tokens"])
         result_text = ""
         async with db.session() as s:
@@ -212,6 +222,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="AI Employer Orchestrator", lifespan=lifespan)
+app.include_router(settings_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],  # Vite dev server

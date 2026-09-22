@@ -149,8 +149,12 @@ async def run_agent(
     task: dict[str, Any],
     emitter: EventSink,
     workspace: Path,
+    settings_model: str | None = None,
 ) -> dict[str, int]:
-    """Run one task through the agentic loop. Returns actual token usage."""
+    """Run one task through the agentic loop. Returns actual token usage.
+
+    `settings_model` overrides the default model when the user configured one
+    in the settings panel."""
     api_tools = tools_registry.to_api_schema()
     system = build_system(agent.get("persona") or agent.get("system_prompt") or "")
 
@@ -175,7 +179,7 @@ async def run_agent(
             break
 
         payload: dict[str, Any] = {
-            "model": MODEL,
+            "model": settings_model or MODEL,
             "max_tokens": MAX_TOKENS,
             "system": system,
             "tools": api_tools,
@@ -296,5 +300,10 @@ async def run_agent(
     return {"input_tokens": total_in, "output_tokens": total_out}
 
 
-def make_client() -> AsyncAnthropic:
-    return AsyncAnthropic(max_retries=0)  # we own the retry loop
+def make_client(settings: dict[str, Any] | None = None) -> AsyncAnthropic:
+    """Build the orchestrator's client from runtime settings (falls back to
+    environment defaults when none saved). Retries stay disabled here —
+    agent_runner owns the retry/backoff loop itself."""
+    from backend.client import make_client as _factory
+
+    return _factory(settings)

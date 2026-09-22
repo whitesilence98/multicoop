@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
+import { Settings as SettingsIcon } from "lucide-react";
 import { useEmployer } from "./lib/store";
 import { useTaskStreams } from "./lib/useTaskStream";
+import TitleBar from "./components/TitleBar";
 import Dashboard from "./components/Dashboard";
 import AgentStudio from "./components/AgentStudio";
 import TaskBoard from "./components/TaskBoard";
 import AgentTerminal from "./components/AgentTerminal";
+import SettingsPanel from "./components/SettingsPanel";
 
 type View = "dashboard" | "studio" | "board" | "terminal";
 
@@ -17,6 +20,7 @@ const NAV: { id: View; label: string }[] = [
 
 export default function App() {
   const [view, setView] = useState<View>("dashboard");
+  const [showSettings, setShowSettings] = useState(false);
   const agents = useEmployer((s) => s.agents);
   const tasks = useEmployer((s) => s.tasks);
   const refreshAgents = useEmployer((s) => s.refreshAgents);
@@ -40,6 +44,7 @@ export default function App() {
 
   return (
     <div className="h-full flex flex-col">
+      <TitleBar />
       <header className="flex items-center gap-6 border-b border-edge bg-panel/80 px-6 py-3">
         <h1 className="font-mono uppercase tracking-wider text-sm font-bold text-neon">
           AI&nbsp;Employer
@@ -66,6 +71,13 @@ export default function App() {
           <span className="text-glow font-bold">
             {tasks.filter((t) => t.status === "running").length}
           </span>
+          <button
+            className="text-text-muted hover:text-neon transition-colors"
+            onClick={() => setShowSettings(true)}
+            title="API & Proxy settings"
+          >
+            <SettingsIcon size={16} />
+          </button>
         </div>
       </header>
 
@@ -75,6 +87,8 @@ export default function App() {
         {view === "studio" && <AgentStudio />}
         {view === "terminal" && <AgentTerminal />}
       </main>
+
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
     </div>
   );
 }

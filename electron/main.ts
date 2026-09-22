@@ -4,10 +4,11 @@
  * Dev:      python -m uvicorn backend.main:app   (venv)
  * Prod:     bundled PyInstaller binary under resources/backend/
  *
- * The sidecar is killed on app quit (before-quit) and on crash we surface a
- * notification via the renderer.
+ * Frameless window: the native title bar and menu are removed; the renderer
+ * supplies a custom React TitleBar (src/components/TitleBar.tsx) that drags
+ * the window and sends control commands over IPC.
  */
-import { app, BrowserWindow, ipcMain, dialog, Notification } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, Notification, Menu } from "electron";
 import { spawn, ChildProcess } from "child_process";
 import * as http from "http";
 import * as path from "path";
@@ -58,7 +59,7 @@ function spawnBackend(): void {
     if (!shuttingDown) {
       new Notification({
         title: "AI Employer backend stopped",
-        body: `The orchestrator process exited (code ${code}). Restart the app.`,
+        body: `The orchestrator process exited (code ${code}). Restart the agent runner.`,
       }).show();
     }
   });
@@ -108,6 +109,7 @@ function createWindow(): void {
     width: 1440,
     height: 900,
     minWidth: 1100,
+    frame: false,            // custom React TitleBar replaces the native frame
     backgroundColor: "#0c0e17",
     titleBarStyle: "hiddenInset",
     webPreferences: {
@@ -128,32 +130,40 @@ function createWindow(): void {
 
 // ---- IPC -----------------------------------------------------------------------
 
-ipcMain.handle("pick-directory", async () => {
-  const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
-  return result.canceled ? null : result.filePaths[0];
-});
+function registerIpc(): void {
+  ipcMain.handle("pick-directory", async () => {
+    const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
+    return result.canceled ? null : result.filePaths[0];
+  });
 
-ipcMain.handle("notify", (_e, { title, body }: { title: string; body: string }) => {
-  new Notification({ title, body }).show();
-});
+  ipcMain.handle("notify", (_e, { title, body }: { title: string; body: string }) => {
+    new Notification({ title, body }).show();
+  });
 
-// ---- app lifecycle ---------------------------------------------------------------
-
-async function isBackendUp(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const req = http.get(BACKEND_URL, (res) => {
-      res.resume();
-      resolve(res.statusCode === 200);
-    });
-    req.on("error", () => resolve(false));
-    req.setTimeout(1_500, () => {
-      req.destroy();
-      resolve(false);
-    });
+  // Window controls from the custom TitleBar (fire-and-forget).
+  ipcMain.on("window-minimize", (e) => {
+    BrowserWindow.fromWebContents(e.sender)?.minimize();
+  });
+  ipcMain.on("window-maximize", (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win) return;
+    if (win.isMaximized()) {
+      win.unmaximize();
+    } else {
+      win.maximize();
+    }
+  });
+  ipcMain.on("window-close", (e) => {
+    BrowserWindow.fromWebContents(e.sender)?.close();
   });
 }
 
+// ---- app lifecycle ---------------------------------------------------------------
+
 app.whenReady().then(async () => {
+  Menu.setApplicationMenu(null); // remove File/Edit/View/Window/Help entirely
+  registerIpc();
+
   try {
     const alreadyUp = await isBackendUp();
     if (!alreadyUp) {
@@ -182,3 +192,17 @@ app.on("window-all-closed", () => {
   killBackend();
   app.quit();
 });
+
+async function isBackendUp(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.get(BACKEND_URL, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on("error", () => resolve(false));
+    req.setTimeout(1_500, () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
