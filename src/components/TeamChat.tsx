@@ -182,32 +182,34 @@ export default function TeamChat() {
   if (!user) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="panel w-full max-w-sm">
-          <div className="section-title mb-4">Sign in to Team Chat</div>
-          <input
-            className="field w-full mb-3"
-            placeholder="YOUR NAME"
-            value={loginName}
-            onChange={(e) => setLoginName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && doLogin()}
-          />
-          <div className="grid grid-cols-3 gap-2 mb-3">
-            {ROLES.map((r) => (
-              <button
-                key={r}
-                className={`btn-ghost flex-1 text-[10px] ${
-                  loginRole === r ? "border-glow text-white" : ""
-                }`}
-                onClick={() => setLoginRole(r)}
-              >
-                {ROLE_META[r].badge}
-              </button>
-            ))}
+        <div className="panel w-full max-w-sm p-6">
+          <div className="section-title mb-5">Sign in to Team Chat</div>
+          <div className="space-y-4">
+            <input
+              className="field w-full"
+              placeholder="YOUR NAME"
+              value={loginName}
+              onChange={(e) => setLoginName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && doLogin()}
+            />
+            <div className="grid grid-cols-3 gap-2">
+              {ROLES.map((r) => (
+                <button
+                  key={r}
+                  className={`btn-ghost flex-1 text-[10px] py-2 ${
+                    loginRole === r ? "border-glow text-white" : ""
+                  }`}
+                  onClick={() => setLoginRole(r)}
+                >
+                  {ROLE_META[r].badge}
+                </button>
+              ))}
+            </div>
+            {loginError && <p className="text-xs text-danger">{loginError}</p>}
+            <button className="btn-primary w-full" onClick={doLogin} disabled={loginBusy || !loginName.trim()}>
+              {loginBusy ? "Signing in…" : "Enter Chat"}
+            </button>
           </div>
-          {loginError && <p className="text-xs text-red-400 mb-2">{loginError}</p>}
-          <button className="btn-primary w-full" onClick={doLogin} disabled={loginBusy || !loginName.trim()}>
-            {loginBusy ? "Signing in…" : "Enter Chat"}
-          </button>
         </div>
       </div>
     );
@@ -219,9 +221,9 @@ export default function TeamChat() {
       {/* Sidebar: roster */}
       <aside className="w-56 shrink-0 border-r border-edge bg-panel/60 p-3 overflow-y-auto">
         <div className="section-title mb-3">Team ({roster.length})</div>
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           {roster.map((m) => (
-            <div key={m.id} className="flex items-center gap-2">
+            <div key={m.id} className="flex items-center gap-2.5">
               <span
                 className="w-2 h-2 rounded-full shrink-0"
                 style={{ background: m.color, boxShadow: `0 0 6px ${m.color}` }}
@@ -244,7 +246,7 @@ export default function TeamChat() {
             ))}
           </select>
           <button
-            className="mt-2 text-[10px] uppercase tracking-wider text-text-muted hover:text-red-400"
+            className="mt-2 text-[10px] uppercase tracking-wider text-text-muted hover:text-danger"
             onClick={logout}
           >
             sign out
@@ -259,7 +261,7 @@ export default function TeamChat() {
           <div className="flex items-center gap-3 text-xs">
             <span
               className={`chip ${
-                wsStatus === "open" ? "text-neon border-neon-dim" : "text-yellow-400 border-yellow-400/40"
+                wsStatus === "open" ? "text-neon border-neon-dim" : "text-warn border-warn/40"
               }`}
             >
               {wsStatus}
@@ -292,7 +294,7 @@ export default function TeamChat() {
                 <span className="text-xs font-bold" style={{ color: m.sender.color }}>
                   {m.sender.username}
                 </span>
-                <div className="text-sm text-text-primary break-words">
+                <div className="mt-0.5 text-sm leading-snug text-text-primary break-words">
                   <MentionText text={m.text} mentionNames={mentionNames} />
                 </div>
               </div>

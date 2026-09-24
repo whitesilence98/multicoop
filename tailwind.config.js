@@ -23,6 +23,10 @@ module.exports = {
         "neon-dim": "#10B981",
         glow: "#6366F1",
         "glow-dim": "#4F46E5",
+        // Status: warnings + failures (tokenized so no raw palette leaks)
+        warn: "#FBBF24",
+        danger: "#F87171",
+        "danger-strong": "#DC2626",  // close-button fill; white text needs the darker red
         // Text
         "text-primary": "#CBD5E1",
         "text-muted": "#64748B",

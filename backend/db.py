@@ -72,6 +72,25 @@ class EventLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class Provider(Base):
+    """A named API connection (Anthropic key, Ollama cloud, local Ollama, ...).
+
+    Agents reference a provider by stringified id in Agent.provider_id
+    ("default" = the runtime settings panel connection instead)."""
+    __tablename__ = "providers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    # anthropic | openai_compatible | ollama | custom (affects auth headers)
+    kind: Mapped[str] = mapped_column(String(30), default="anthropic")
+    base_url: Mapped[str] = mapped_column(String(300), default="")
+    api_key: Mapped[str] = mapped_column(Text, default="")   # never sent to the UI in full
+    default_model: Mapped[str] = mapped_column(String(120), default="")
+    added_models: Mapped[list] = mapped_column(JSON, default=list)  # pinned model ids for the picker
+    is_default: Mapped[bool] = mapped_column(default=False)  # used for new agents' preselect
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Setting(Base):
     __tablename__ = "settings"
 

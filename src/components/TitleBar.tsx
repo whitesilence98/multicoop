@@ -39,7 +39,7 @@ export default function TitleBar() {
               □
             </button>
             <button
-              className={`${btnBase} hover:bg-red-600 hover:text-white`}
+              className={`${btnBase} hover:bg-danger-strong hover:text-white`}
               onClick={() => window.electronAPI?.close()}
               title="Close"
             >

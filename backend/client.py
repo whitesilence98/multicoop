@@ -101,6 +101,7 @@ def make_client(settings: dict[str, Any] | None = None) -> AsyncAnthropic:
 def make_httpx_client(settings: dict[str, Any] | None = None) -> httpx.AsyncClient:
     """Raw httpx client honoring base_url + proxy — used by the test ping."""
     kwargs = build_httpx_args(settings or {})
-    kwargs.pop("api_key", None)  # httpx has no api_key param
+    kwargs.pop("api_key", None)       # httpx has no api_key param
+    kwargs.pop("default_headers", None)  # SDK-only kwarg; callers pass headers per request
     kwargs.setdefault("timeout", 15.0)
     return httpx.AsyncClient(**kwargs)

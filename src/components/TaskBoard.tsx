@@ -32,7 +32,7 @@ export default function TaskBoard() {
       {/* New task */}
       <div className="panel mb-6">
         <div className="section-title">Assign Task</div>
-        <div className="mt-3 flex flex-wrap gap-2 items-end">
+        <div className="mt-3 flex flex-wrap gap-2 items-end gap-y-3">
           <input
             className="field w-64"
             placeholder="TASK TITLE"
@@ -78,10 +78,21 @@ export default function TaskBoard() {
           const colTasks = tasks.filter((t) => t.status === col.status || (col.status === "done" && t.status === "failed"));
           return (
             <div key={col.status} className="panel min-h-40">
-              <div className="section-title">
+              <div className="section-title pb-0.5">
                 {col.label} ({colTasks.length})
               </div>
               <div className="mt-3 space-y-2">
+                {colTasks.length === 0 && (
+                  <p className="text-xs text-text-muted/70 italic py-2">
+                    {col.status === "pending"
+                      ? "Nothing queued. Assign a task above."
+                      : col.status === "running"
+                      ? "No runs in flight."
+                      : col.status === "waiting_approval"
+                      ? "No approvals blocking."
+                      : "Nothing completed yet."}
+                  </p>
+                )}
                 {colTasks.map((t) => {
                   const agent = agents.find((a) => a.id === t.agent_id);
                   return (
@@ -95,7 +106,7 @@ export default function TaskBoard() {
                         <span className="text-xs text-text-muted">#{t.id}</span>
                         <span className="text-sm font-bold text-text-primary truncate">{t.title}</span>
                         {t.priority > 0 && (
-                          <span className="chip ml-auto text-yellow-400 border-yellow-400/40">
+                          <span className="chip ml-auto text-warn border-warn/40">
                             p{t.priority}
                           </span>
                         )}
@@ -117,12 +128,12 @@ export default function TaskBoard() {
                         </button>
                       )}
                       {t.status === "failed" && (
-                        <span className="chip mt-2 inline-block text-red-400 border-red-400/40">
+                        <span className="chip mt-2 inline-block text-danger border-danger/40">
                           failed
                         </span>
                       )}
                       {t.input_tokens + t.output_tokens > 0 && (
-                        <div className="mt-1 text-[10px] uppercase tracking-wider text-text-muted">
+                        <div className="mt-1 text-[10px] uppercase tracking-wider text-text-muted tabular-nums">
                           {((t.input_tokens + t.output_tokens) / 1000).toFixed(1)}K tok
                         </div>
                       )}

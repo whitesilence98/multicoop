@@ -66,12 +66,16 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="ml-auto flex items-center gap-4 text-xs text-text-muted">
-          <span className="uppercase tracking-wider">agents</span>
-          <span className="text-neon font-bold">{agents.length}</span>
-          <span className="uppercase tracking-wider">active</span>
-          <span className="text-glow font-bold">
-            {tasks.filter((t) => t.status === "running").length}
+        <div className="ml-auto flex items-center gap-5 text-xs text-text-muted">
+          <span className="flex items-center gap-1.5">
+            <span className="uppercase tracking-wider">agents</span>
+            <span className="text-neon font-bold tabular-nums">{agents.length}</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="uppercase tracking-wider">active</span>
+            <span className="text-glow font-bold tabular-nums">
+              {tasks.filter((t) => t.status === "running").length}
+            </span>
           </span>
           <button
             className="text-text-muted hover:text-neon transition-colors"

@@ -7,8 +7,21 @@ export interface Agent {
   permission_level: "readonly" | "standard" | "elevated";
   allowed_tools: string[];
   color: string;
-  provider_id: string;
+  provider_id: string; // "default" = runtime settings connection
   model: string | null;
+}
+
+/** A saved API connection (Anthropic key, Ollama cloud, local Ollama, ...). */
+export interface ProviderProfile {
+  id: number;
+  name: string;
+  kind: "anthropic" | "openai_compatible" | "ollama" | "custom";
+  base_url: string;
+  default_model: string;
+  added_models: string[];
+  is_default: boolean;
+  has_api_key: boolean;
+  api_key_preview: string;
 }
 
 export interface Task {
@@ -65,4 +78,40 @@ export const api = {
 
   metrics: () => req<Metrics>("/metrics"),
   usage: () => req<{ input_tokens: number; output_tokens: number }>("/usage"),
+
+  // Provider profiles (saved connections)
+  listProviders: () => req<ProviderProfile[]>("/providers/profiles"),
+  createProvider: (body: Partial<ProviderProfile> & { api_key?: string | null }) =>
+    req<ProviderProfile>("/providers/profiles", { method: "POST", body: JSON.stringify(body) }),
+  updateProvider: (id: number, body: Partial<ProviderProfile> & { api_key?: string | null }) =>
+    req<ProviderProfile>(`/providers/profiles/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  deleteProvider: (id: number) =>
+    req<{ status: string }>(`/providers/profiles/${id}`, { method: "DELETE" }),
+
+  // Connection diagnostics (unsaved-changes testable)
+  testProvider: (base_url: string, api_key?: string) =>
+    req<{ ok: boolean; latency_ms: number | null; detail: string }>("/providers/test", {
+      method: "POST",
+      body: JSON.stringify({ base_url, api_key }),
+    }),
+  fetchProviderModels: (base_url: string, api_key?: string) =>
+    req<{ models: string[]; url: string; detail: string }>("/providers/fetch-models", {
+      method: "POST",
+      body: JSON.stringify({ base_url, api_key }),
+    }),
+
+  // Claude Code agent-definition sync (.claude/agents/*.md)
+  exportClaudeAgents: () =>
+    req<{ target_dir: string; exported: string[]; skipped: string[] }>(
+      "/agents/claude/export",
+      { method: "POST", body: JSON.stringify({}) }
+    ),
+  importClaudeAgents: () =>
+    req<{ target_dir: string; created: string[]; updated: string[]; skipped: string[] }>(
+      "/agents/claude/import",
+      { method: "POST", body: JSON.stringify({}) }
+    ),
 };

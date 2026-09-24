@@ -28,10 +28,11 @@ from sse_starlette.sse import EventSourceResponse
 from sqlalchemy import select
 
 from backend.agent_runner import EventSink, make_client, run_agent
-from backend.db import DB, Agent, Task, event_to_dict, utcnow
+from backend.db import DB, Agent, Provider, Task, event_to_dict, utcnow
 from backend.rate_limiter import Orchestrator, RunRequest
 from backend.routes.settings import router as settings_router
-from backend.routes.providers import router as providers_router
+from backend.routes.providers import router as providers_router, seed_from_env
+from backend.routes.claude_sync import router as claude_sync_router
 from backend.routes.chat import router as chat_router
 from backend.tools import ApprovalRequired, build_default_registry
 
@@ -124,12 +125,24 @@ async def _run_handler(req: RunRequest) -> dict[str, int]:
             return {"input_tokens": 0, "output_tokens": 0}
         task.status = "running"
         task.started_at = utcnow()
+        # Resolve the agent's provider profile up front (sync lookup in the
+        # runner later); "default" = the runtime settings-panel connection.
+        provider_settings: dict | None = None
+        pid = str(agent.provider_id) if agent and agent.provider_id else "default"
+        if pid != "default":
+            prov = await s.get(Provider, int(pid)) if pid.isdigit() else None
+            if prov and (prov.base_url or prov.api_key):
+                provider_settings = {
+                    "provider": prov.kind,
+                    "base_url": prov.base_url,
+                    "api_key": prov.api_key,
+                }
         agent_snapshot = {
             "id": agent.id if agent else None,
             "persona": agent.persona if agent else "You are a general-purpose assistant.",
             "permission_level": agent.permission_level if agent else "standard",
             "allowed_tools": agent.allowed_tools if agent else list(registry.tools.keys()),
-            "provider_id": agent.provider_id if agent else "default",
+            "provider_id": pid,
             "model": agent.model if agent else None,
         }
         task_snapshot = {"id": task.id, "description": task.description, "title": task.title}
@@ -146,11 +159,19 @@ async def _run_handler(req: RunRequest) -> dict[str, int]:
         run_client = await _runtime_client()
 
         def _client_factory(resolved_model: str):
-            """Per-agent provider routing. provider_id "default" keeps the
-            runtime client (env/panel config); any other provider_id will
-            rebuild from that provider's stored config once multi-provider
-            lands."""
-            return None  # keep the existing client for "default"
+            """Per-agent provider routing: rebuild a dedicated client from the
+            agent's resolved Provider profile; None keeps the runtime client.
+            The saved runtime proxy applies to all outbound connections."""
+            if provider_settings is None:
+                return None  # "default" or missing profile → runtime client
+            return make_client({**provider_settings, "proxy": saved.get("proxy") or {}})
+
+        tools = registry.to_api_schema(agent_snapshot["allowed_tools"])
+        usage = await run_agent(
+            run_client, registry, agent_snapshot, task_snapshot, hub, WORKSPACE,
+            settings_model=settings_model,
+            client_factory=_client_factory,
+        )
 
         tools = registry.to_api_schema(agent_snapshot["allowed_tools"])
         usage = await run_agent(
@@ -268,6 +289,7 @@ async def _seed_default_agents() -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global orchestrator
     await db.init()
+    seed_from_env(db)
     await _seed_default_agents()
     orchestrator = Orchestrator(run_handler=_run_handler, rpm=50, itpm=200_000, otpm=80_000, workers=4)
     await orchestrator.start()
@@ -341,6 +363,7 @@ def _enqueue_chat_task(agent_row: dict, text: str, client_id: str) -> None:
 app = FastAPI(title="AI Employer Orchestrator", lifespan=lifespan)
 app.include_router(settings_router)
 app.include_router(providers_router)
+app.include_router(claude_sync_router)
 app.include_router(chat_router)
 app.add_middleware(
     CORSMiddleware,

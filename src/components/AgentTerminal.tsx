@@ -23,10 +23,10 @@ function EventLine({ ev }: { ev: TerminalEvent }) {
         </div>
       );
     case "log":
-      return <div className="text-yellow-400/80 text-xs">{p.text}</div>;
+      return <div className="text-warn/80 text-xs">{p.text}</div>;
     case "turn_usage":
       return (
-        <div className="text-[10px] uppercase tracking-wider text-text-muted">
+        <div className="text-[10px] uppercase tracking-wider text-text-muted tabular-nums">
           ⇄ in {p.input_tokens} · cache {p.cache_read} · out {p.output_tokens}
         </div>
       );
@@ -35,9 +35,9 @@ function EventLine({ ev }: { ev: TerminalEvent }) {
     case "run_finished":
       return <div className="text-neon font-bold mt-2">✓ finished</div>;
     case "run_failed":
-      return <div className="text-red-400 font-bold mt-2">✗ failed — {p.error}</div>;
+      return <div className="text-danger font-bold mt-2">✗ failed — {p.error}</div>;
     case "approval_request":
-      return <div className="text-yellow-400 font-bold">⏸ approval requested — {p.tool}</div>;
+      return <div className="text-warn font-bold">⏸ approval requested — {p.tool}</div>;
     default:
       return null;
   }
@@ -69,7 +69,7 @@ export default function AgentTerminal() {
           <button
             key={t.id}
             onClick={() => setSelected(t.id)}
-            className={`w-full text-left px-2 py-1.5 rounded text-xs truncate ${
+            className={`w-full text-left px-2.5 py-2 rounded text-xs leading-snug truncate ${
               current === t.id ? "bg-glow-dim text-white" : "text-text-muted hover:text-text-primary"
             }`}
           >
@@ -87,7 +87,7 @@ export default function AgentTerminal() {
         </div>
         <div
           ref={scrollRef}
-          className="flex-1 overflow-y-auto p-4 bg-inset text-sm leading-relaxed"
+          className="flex-1 overflow-y-auto p-4 bg-inset text-sm leading-relaxed [line-height:1.65]"
         >
           {events.length === 0 ? (
             <span className="text-text-muted">

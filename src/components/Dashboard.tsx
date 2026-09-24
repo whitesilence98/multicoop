@@ -4,9 +4,9 @@ import { useEmployer } from "../lib/store";
 const STATUS_COLORS: Record<string, string> = {
   pending: "text-text-muted border-edge-bright",
   running: "text-glow border-glow",
-  waiting_approval: "text-yellow-400 border-yellow-400",
+  waiting_approval: "text-warn border-warn",
   done: "text-neon border-neon-dim",
-  failed: "text-red-400 border-red-400",
+  failed: "text-danger border-danger",
 };
 
 function Metric({
@@ -21,7 +21,7 @@ function Metric({
   return (
     <div className="panel">
       <div className="section-title">{title}</div>
-      <div className={`mt-2 text-2xl font-bold ${accent}`}>{value}</div>
+      <div className={`mt-2 text-2xl leading-tight font-bold tabular-nums ${accent}`}>{value}</div>
     </div>
   );
 }
@@ -50,7 +50,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Metric title="Workforce" value={String(agents.length)} />
         <Metric title="Running" value={String(running.length)} accent="text-glow" />
-        <Metric title="Queue Backlog" value={String(metrics?.queue_depth ?? backlog.length)} accent="text-yellow-400" />
+        <Metric title="Queue Backlog" value={String(metrics?.queue_depth ?? backlog.length)} accent="text-warn" />
         <Metric
           title="Tokens Used"
           value={`${((usage.input_tokens + usage.output_tokens) / 1000).toFixed(1)}K`}
@@ -62,7 +62,7 @@ export default function Dashboard() {
       {metrics && (
         <div className="panel">
           <div className="section-title">Rate Limit Budget</div>
-          <div className="mt-3 grid grid-cols-3 gap-4">
+          <div className="mt-3 grid grid-cols-3 gap-4 pt-0.5">
             {Object.entries(metrics.buckets).map(([name, b]) => {
               const pct = b.capacity > 0 ? (b.available / b.capacity) * 100 : 0;
               return (
@@ -136,8 +136,8 @@ export default function Dashboard() {
           ) : (
             <div className="mt-3 space-y-3">
               {approvalList.filter(([, d]) => d).map(([taskId, d]) => (
-                <div key={taskId} className="rounded-lg border border-yellow-400/40 bg-inset p-3">
-                  <div className="text-xs uppercase tracking-wider text-yellow-400 font-bold">
+                <div key={taskId} className="rounded-lg border border-warn/40 bg-inset p-3">
+                  <div className="text-xs uppercase tracking-wider text-warn font-bold">
                     task #{taskId} — {d!.tool}
                   </div>
                   <pre className="mt-1 text-xs text-text-muted overflow-x-auto">
