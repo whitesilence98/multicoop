@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { ArrowDownToLine, ArrowUpFromLine, Loader2 } from "lucide-react";
+import {
+  ArrowDownToLine, ArrowUpFromLine, Check, Loader2, X,
+} from "lucide-react";
 import { api, Agent, ProviderProfile } from "../lib/api";
 import { useEmployer } from "../lib/store";
 import { useSettingsStore } from "../store/useSettingsStore";
@@ -75,12 +77,143 @@ function ProviderSelect({
   );
 }
 
+/** Inline edit form for one roster agent (PATCH on save). */
+function AgentEditForm({
+  agent, profiles, onDone,
+}: {
+  agent: Agent;
+  profiles: ProviderProfile[];
+  onDone: () => void;
+}) {
+  const refreshAgents = useEmployer((s) => s.refreshAgents);
+  const [draft, setDraft] = useState({
+    name: agent.name,
+    persona: agent.persona,
+    permission_level: agent.permission_level,
+    allowed_tools: [...agent.allowed_tools],
+    color: agent.color,
+    provider_id: agent.provider_id || "default",
+    model: agent.model || "",
+  });
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.patchAgent(agent.id, {
+        name: draft.name.trim() || agent.name,
+        persona: draft.persona,
+        permission_level: draft.permission_level,
+        allowed_tools: draft.allowed_tools,
+        color: draft.color,
+        provider_id: draft.provider_id,
+        model: draft.model || null,
+      });
+      await refreshAgents();
+      onDone();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleTool = (t: string) =>
+    setDraft((d) => ({
+      ...d,
+      allowed_tools: d.allowed_tools.includes(t)
+        ? d.allowed_tools.filter((x) => x !== t)
+        : [...d.allowed_tools, t],
+    }));
+
+  return (
+    <div className="mt-2.5 rounded-lg border border-glow/40 bg-panel/60 p-3 space-y-2.5">
+      <input
+        className="field w-full text-sm"
+        placeholder="AGENT NAME"
+        value={draft.name}
+        onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+      />
+      <textarea
+        className="field w-full h-24 resize-none text-xs leading-relaxed"
+        placeholder="PERSONA / SYSTEM PROMPT"
+        value={draft.persona}
+        onChange={(e) => setDraft({ ...draft, persona: e.target.value })}
+      />
+      <div className="flex gap-1.5">
+        {(["readonly", "standard", "elevated"] as const).map((lvl) => (
+          <button
+            key={lvl}
+            className={`btn-ghost flex-1 text-[10px] py-1 ${
+              draft.permission_level === lvl ? "border-glow text-white" : ""
+            }`}
+            onClick={() => setDraft({ ...draft, permission_level: lvl })}
+          >
+            {lvl}
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {TOOL_OPTIONS.map((t) => (
+          <button
+            key={t}
+            className={`btn-ghost text-[10px] py-1 ${
+              draft.allowed_tools.includes(t) ? "border-neon-dim text-neon" : ""
+            }`}
+            onClick={() => toggleTool(t)}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+      {/* color */}
+      <div className="flex items-center gap-1.5">
+        {["#00FF9D", "#6366F1", "#F59E0B", "#F472B6", "#38BDF8", "#F87171"].map((c) => (
+          <button
+            key={c}
+            className={`w-4 h-4 rounded-full border ${
+              draft.color.toLowerCase() === c.toLowerCase() ? "border-white" : "border-transparent"
+            }`}
+            style={{ background: c }}
+            onClick={() => setDraft({ ...draft, color: c })}
+            title={c}
+          />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <ProviderSelect
+          value={draft.provider_id}
+          profiles={profiles}
+          onChange={(id) => setDraft({ ...draft, provider_id: id })}
+        />
+        <ModelSelect
+          value={draft.model}
+          onChange={(m) => setDraft({ ...draft, model: m })}
+        />
+      </div>
+      <div className="flex gap-2 justify-end">
+        <button className="btn-ghost text-[10px]" onClick={onDone} disabled={busy}>
+          Cancel
+        </button>
+        <button
+          className="btn-primary flex items-center gap-1.5 text-[10px]"
+          onClick={save}
+          disabled={busy || !draft.name.trim()}
+        >
+          {busy ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function AgentStudio() {
   const agents = useEmployer((s) => s.agents);
   const refreshAgents = useEmployer((s) => s.refreshAgents);
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
   const [syncNote, setSyncNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [syncBusy, setSyncBusy] = useState<null | "export" | "import">(null);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [form, setForm] = useState({
     name: "",
     persona: "",
@@ -246,7 +379,12 @@ export default function AgentStudio() {
       {/* Roster */}
       <div className="panel h-fit">
         <div className="section-title flex items-center justify-between">
-          <span>Roster ({agents.length})</span>
+          <span>
+            Roster ({agents.length}) · {agents.filter((a) => {
+              const p = profiles.find((q) => String(q.id) === a.provider_id);
+              return Boolean(a.model || p?.default_model);
+            }).length} active
+          </span>
           <div className="flex items-center gap-2">
             <button
               className="btn-ghost flex items-center gap-1.5 text-[10px]"
@@ -271,55 +409,103 @@ export default function AgentStudio() {
         <div className="mt-4 space-y-3">
           {agents.map((a) => {
             const provider = profiles.find((p) => String(p.id) === a.provider_id);
+            // Active = has an assigned model (own pin OR provider default).
+            const active = Boolean(a.model || provider?.default_model);
+            const editing = editId === a.id;
             return (
-              <div key={a.id} className="rounded-lg border border-edge bg-inset p-3">
+              <div key={a.id} className={`rounded-lg border bg-inset p-3 ${active ? "border-neon-dim/60" : "border-edge opacity-75"}`}>
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full" style={{ background: a.color }} />
+                  <span
+                    className="w-2 h-2 rounded-full"
+                    style={{
+                      background: active ? a.color : "#2A2F45",
+                      boxShadow: active ? `0 0 6px ${a.color}` : "none",
+                    }}
+                    title={active ? "active — model assigned" : "inactive — no model assigned"}
+                  />
                   <span className="font-bold text-sm">{a.name}</span>
                   <span className="chip text-text-muted border-edge-bright">{a.permission_level}</span>
                   {/* Assigned-model badge */}
                   <span
                     className={`chip ${
-                      a.model ? "text-glow border-glow" : "text-text-muted border-edge-bright"
+                      active ? "text-glow border-glow" : "text-warn border-warn/50"
                     }`}
-                    title={a.model ? `Pinned model: ${a.model}` : "Uses the connection's default model"}
+                    title={
+                      active
+                        ? a.model
+                          ? `Pinned model: ${a.model}`
+                          : `Provider default: ${provider?.default_model}`
+                        : "Inactive — no model assigned (assign one below to activate)"
+                    }
                   >
-                    {a.model || "default"}
+                    {a.model || provider?.default_model || "inactive"}
                   </span>
                   <button
-                    className="ml-auto text-xs uppercase tracking-wider text-text-muted hover:text-danger"
-                    onClick={async () => {
-                      await api.deleteAgent(a.id);
-                      await refreshAgents();
-                    }}
+                    className="ml-auto text-xs uppercase tracking-wider text-text-muted hover:text-neon"
+                    onClick={() => setEditId(editing ? null : a.id)}
+                    title="Edit this agent"
                   >
-                    terminate
+                    {editing ? "close" : "edit"}
                   </button>
-                </div>
-                <p className="mt-2 text-xs leading-relaxed text-text-muted line-clamp-2">{a.persona || "—"}</p>
-                <div className="mt-2.5 flex flex-wrap gap-1">
-                  {a.allowed_tools.map((t) => (
-                    <span key={t} className="chip text-neon-dim border-edge-bright">
-                      {t}
+                  {confirmDelete === a.id ? (
+                    <span className="flex items-center gap-1">
+                      <button
+                        className="chip text-danger border-danger/60"
+                        onClick={async () => {
+                          setConfirmDelete(null);
+                          await api.deleteAgent(a.id);
+                          await refreshAgents();
+                        }}
+                      >
+                        confirm
+                      </button>
+                      <button
+                        className="chip text-text-muted border-edge-bright"
+                        onClick={() => setConfirmDelete(null)}
+                      >
+                        cancel
+                      </button>
                     </span>
-                  ))}
+                  ) : (
+                    <button
+                      className="text-xs uppercase tracking-wider text-text-muted hover:text-danger"
+                      onClick={() => setConfirmDelete(a.id)}
+                      title="Terminate this agent"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
                 </div>
-                {/* Inline connection + model reassignment */}
-                <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <ProviderSelect
-                    value={a.provider_id || "default"}
-                    profiles={profiles}
-                    onChange={(id) => patchAgent(a.id, { provider_id: id })}
-                  />
-                  <ModelSelect
-                    value={a.model || ""}
-                    onChange={(m) => patchAgent(a.id, { model: m || null })}
-                  />
-                </div>
-                {provider && (
-                  <div className="mt-1 text-[10px] text-text-muted font-mono truncate">
-                    ↳ {provider.base_url}
-                  </div>
+                {editing ? (
+                  <AgentEditForm agent={a} profiles={profiles} onDone={() => setEditId(null)} />
+                ) : (
+                  <>
+                    <p className="mt-2 text-xs leading-relaxed text-text-muted line-clamp-2">{a.persona || "—"}</p>
+                    <div className="mt-2.5 flex flex-wrap gap-1">
+                      {a.allowed_tools.map((t) => (
+                        <span key={t} className="chip text-neon-dim border-edge-bright">
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                    {/* Inline connection + model reassignment */}
+                    <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <ProviderSelect
+                        value={a.provider_id || "default"}
+                        profiles={profiles}
+                        onChange={(id) => patchAgent(a.id, { provider_id: id })}
+                      />
+                      <ModelSelect
+                        value={a.model || ""}
+                        onChange={(m) => patchAgent(a.id, { model: m || null })}
+                      />
+                    </div>
+                    {provider && (
+                      <div className="mt-1 text-[10px] text-text-muted font-mono truncate">
+                        ↳ {provider.base_url}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             );

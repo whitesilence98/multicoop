@@ -63,15 +63,27 @@ async def chat_login(body: LoginIn) -> dict[str, str]:
     if not username:
         raise HTTPException(400, "username required")
 
+    # Prefer the user's chosen highlight color from Settings (saved under the
+    # runtime settings row); fall back to the role's default.
+    color = ROLES[role]["color"]
+    try:
+        from backend.main import db
+        from backend.routes.settings import _load_raw
+
+        saved = await _load_raw(db)
+        color = saved.get("user_color") or color
+    except Exception:  # noqa: BLE001 — chat login must not break on settings read
+        pass
+
     token = secrets.token_urlsafe(24)
     SESSIONS[token] = {
         "client_id": f"u_{secrets.token_hex(8)}",
         "username": username,
         "role": role,
         "badge": ROLES[role]["badge"],
-        "color": ROLES[role]["color"],
+        "color": color,
     }
-    return {"token": token}
+    return {"token": token, "color": color}
 
 
 def _session_for(token: str) -> dict | None:

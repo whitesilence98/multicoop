@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -30,6 +31,7 @@ from sqlalchemy import select
 from backend.agent_runner import EventSink, make_client, run_agent
 from backend.db import DB, Agent, Provider, Task, event_to_dict, utcnow
 from backend.rate_limiter import Orchestrator, RunRequest
+from backend.routes.auth import router as auth_router
 from backend.routes.settings import router as settings_router
 from backend.routes.providers import router as providers_router, seed_from_env
 from backend.routes.claude_sync import router as claude_sync_router
@@ -116,6 +118,23 @@ class SSEHub(EventSink):
             await db.update_task(self.task_id, status="running")
 
 
+def _norm_name(s: str) -> str:
+    """Normalization for @mention matching: lowercase, drop spaces/hyphens/
+    underscores so '@Software-Developer' finds 'Software Developer'."""
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+async def _effective_model(agent: Agent, session: Any) -> str:
+    """Model an agent will actually run on: its own pin, else the assigned
+    provider profile's default_model. Empty = agent is inactive (no model)."""
+    model = (agent.model or "").strip()
+    if not model:
+        pid = str(agent.provider_id or "default")
+        prov = await session.get(Provider, int(pid)) if pid.isdigit() else None
+        model = ((prov.default_model if prov else "") or "").strip()
+    return model
+
+
 async def _run_handler(req: RunRequest) -> dict[str, int]:
     """Orchestrator callback: execute one task run end-to-end."""
     async with db.session() as s:
@@ -145,8 +164,28 @@ async def _run_handler(req: RunRequest) -> dict[str, int]:
             "provider_id": pid,
             "model": agent.model if agent else None,
         }
+        # Active-gate: an agent is only considered ACTIVE (runnable) when a
+        # model is actually assigned — its own pin, else its provider's
+        # default_model. Without one the run would silently use the wrong
+        # provider's model; fail the task loudly instead.
+        if agent is not None:
+            effective = await _effective_model(agent, s)
+            if not effective:
+                task.status = "failed"
+                task.finished_at = utcnow()
+                task.result = (
+                    f"{agent.name} has no assigned model — assign one in "
+                    f"Studio (model pin or provider default) to activate it."
+                )
+                await s.commit()
+            agent_snapshot["model"] = effective or None
         task_snapshot = {"id": task.id, "description": task.description, "title": task.title}
         await s.commit()
+
+    if agent_snapshot["model"] is None and agent_snapshot["id"] is not None:
+        # Inactive agent (no assigned model): task already marked failed above.
+        await _broadcast_task_done(req.task_id, "failed", task_snapshot["title"])
+        return {"input_tokens": 0, "output_tokens": 0}
 
     hub = SSEHub(req.task_id, agent_snapshot["id"])
     await hub.emit("run_started", {"task": task_snapshot["title"]})
@@ -312,12 +351,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # ---- chat wiring helpers ---------------------------------------------------------
 
 async def _agent_row_by_name(name: str) -> dict | None:
-    """Look up an agent by exact name (used by @mentions in chat)."""
+    """Resolve a chat @mention to an agent. Matching is normalized
+    (case/separator-insensitive: '@Software-Developer' finds 'Software
+    Developer'). Only ACTIVE agents (assigned model) resolve — inactive
+    ones are invisible to chat so @mentioning them can't queue dead runs."""
     async with db.session() as s:
-        rows = (await s.execute(select(Agent).where(Agent.name == name))).scalars().all()
-        if not rows:
+        rows = (await s.execute(select(Agent))).scalars().all()
+        target = _norm_name(name)
+        a = next((x for x in rows if _norm_name(x.name) == target), None)
+        if a is None:
             return None
-        a = rows[0]
+        if not await _effective_model(a, s):
+            return None  # inactive — mention silently ignored
         return {
             "id": a.id,
             "name": a.name,
@@ -361,6 +406,7 @@ def _enqueue_chat_task(agent_row: dict, text: str, client_id: str) -> None:
 
 
 app = FastAPI(title="AI Employer Orchestrator", lifespan=lifespan)
+app.include_router(auth_router)
 app.include_router(settings_router)
 app.include_router(providers_router)
 app.include_router(claude_sync_router)
@@ -506,6 +552,16 @@ async def dispatch_task(task_id: int) -> dict[str, Any]:
             raise HTTPException(404, "task not found")
         if task.agent_id is None:
             raise HTTPException(400, "task has no assigned agent")
+        agent = await s.get(Agent, task.agent_id)
+        if agent is None:
+            raise HTTPException(400, "assigned agent no longer exists")
+        # Only agents with an assigned model (own pin or provider default)
+        # are active and dispatchable.
+        if not await _effective_model(agent, s):
+            raise HTTPException(
+                409,
+                f"{agent.name} is inactive — assign a model in Studio to activate it",
+            )
     assert orchestrator is not None
     await orchestrator.submit(
         RunRequest(task_id=task_id, agent_id=task.agent_id, est_input_tokens=4_000, est_output_tokens=4_000)

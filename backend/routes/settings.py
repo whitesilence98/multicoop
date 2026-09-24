@@ -7,6 +7,7 @@ key is never returned in full — GET returns a masked preview and a
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Literal
 
@@ -41,6 +42,7 @@ class SettingsIn(BaseModel):
     max_retries: int = Field(default=3, ge=0, le=10)
     added_models: list[str] | None = None  # None => keep existing
     proxy: ProxyIn | None = None
+    user_color: str | None = None   # chat highlight color for the human user
 
 
 class SettingsOut(BaseModel):
@@ -51,6 +53,7 @@ class SettingsOut(BaseModel):
     max_retries: int
     added_models: list[str] = Field(default_factory=list)
     proxy: dict
+    user_color: str = "#00FF9D"
     has_api_key: bool
     api_key_preview: str  # e.g. "sk-ant-a…9f2e" — never the full key
 
@@ -120,6 +123,8 @@ def _resolved(settings: dict, incoming: SettingsIn) -> dict:
         if incoming.proxy.password is not None:
             proxy["password"] = incoming.proxy.password
         out["proxy"] = proxy
+    if incoming.user_color and re.fullmatch(r"#[0-9a-fA-F]{6}", incoming.user_color.strip()):
+        out["user_color"] = incoming.user_color.strip().lower()
     return out
 
 
@@ -133,6 +138,7 @@ def _to_out(settings: dict) -> SettingsOut:
         max_retries=settings.get("max_retries") or 3,
         added_models=list(settings.get("added_models") or []),
         proxy=settings.get("proxy") or {"enabled": False},
+        user_color=settings.get("user_color") or "#00FF9D",
         has_api_key=bool(key),
         api_key_preview=_mask(key),
     )

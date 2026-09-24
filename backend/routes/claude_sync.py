@@ -135,11 +135,23 @@ def _parse_simple_frontmatter(text: str) -> tuple[dict[str, str], str]:
 
 
 def markdown_to_agent_spec(text: str, fallback_name: str) -> dict[str, Any] | None:
-    """Parse a subagent .md file into an AgentIn-shaped dict (None = skip)."""
+    """Parse a subagent .md file into an AgentIn-shaped dict (None = skip).
+
+    Only files carrying app round-trip metadata (x-app-name) are imported —
+    the directory may also hold unrelated Claude Code subagents the user
+    manages by hand, which must not leak into the app roster."""
     fm, body = _parse_simple_frontmatter(text)
     name = fm.get("x-app-name") or fm.get("name") or fallback_name
     if not name:
         return None
+    if not fm.get("x-app-name"):
+        return None  # not app-managed (no x-app-name metadata) — skip
+
+    def _clean_model(v: str | None) -> str | None:
+        m = (v or "").strip()
+        # Placeholders some tooling writes ('inherit') are not real ids.
+        return m if m and m.lower() != "inherit" else None
+
     tools_raw = fm.get("tools", "")
     claude_tools = [t.strip() for t in tools_raw.split(",") if t.strip()]
     spec: dict[str, Any] = {
@@ -148,7 +160,7 @@ def markdown_to_agent_spec(text: str, fallback_name: str) -> dict[str, Any] | No
         "permission_level": fm.get("x-permission-level", "standard"),
         "allowed_tools": _to_app_tools(claude_tools) or ["read_file", "list_dir"],
         "color": fm.get("x-color", "#6366F1"),
-        "model": fm.get("model") or None,
+        "model": _clean_model(fm.get("model")),
     }
     if fm.get("x-provider-id"):
         spec["provider_id"] = fm["x-provider-id"]
@@ -239,7 +251,10 @@ async def import_agents(body: SyncDir | None = None) -> ImportOut:
                 continue
             spec = markdown_to_agent_spec(text, path.stem)
             if not spec:
-                skipped.append(f"{path.name}: no agent name found")
+                # Either unparseable or not app-managed (no x-app-name in
+                # frontmatter) — e.g. hand-written Claude Code subagents
+                # sharing the global directory.
+                skipped.append(f"{path.name}: not an app-managed agent file")
                 continue
             row = existing.get(spec["name"])
             if row is None:

@@ -18,6 +18,7 @@ export interface RuntimeSettings {
   max_retries: number;
   added_models: string[]; // persisted chip list (fetched + manual)
   proxy: ProxySettings;
+  user_color: string; // chat highlight color for the human user
 }
 
 export type TestStatus = "idle" | "testing" | "ok" | "failed";
@@ -37,6 +38,7 @@ export interface SettingsOut {
     username: string;
     password?: string;
   };
+  user_color: string;
   has_api_key: boolean;
   api_key_preview: string;
 }
@@ -94,6 +96,7 @@ const DEFAULT_FORM: RuntimeSettings = {
     username: "",
     password: "",
   },
+  user_color: "#00FF9D",
 };
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -143,6 +146,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             username: s.proxy?.username ?? "",
             password: "", // never echo stored proxy password
           },
+          user_color: s.user_color || "#00FF9D",
         },
         hasApiKey: s.has_api_key,
         apiKeyPreview: s.api_key_preview,

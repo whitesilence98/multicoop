@@ -1,9 +1,11 @@
 import { createContext, useContext, useEffect, useState } from "react";
+import { API_HOST } from "../lib/api";
 
 export interface AuthUser {
   token: string;
   username: string;
   role: Role;
+  color?: string; // chat highlight color (from Settings); server echoes it
 }
 
 export type Role = "Project Director" | "Engineering Lead" | "Product Owner";
@@ -52,14 +54,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const login = async (username: string, role: Role) => {
-    const res = await fetch("/api/chat/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, role }),
-    });
+    const res = await fetch(
+      location.protocol === "http:" || location.protocol === "https:"
+        ? "/api/chat/login"
+        : `http://${API_HOST}/api/chat/login`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, role }),
+      }
+    );
     if (!res.ok) throw new Error(await res.text());
-    const { token } = (await res.json()) as { token: string };
-    const u: AuthUser = { token, username, role };
+    const { token, color } = (await res.json()) as { token: string; color?: string };
+    const u: AuthUser = { token, username, role, color };
     setUser(u);
     persist(u);
   };

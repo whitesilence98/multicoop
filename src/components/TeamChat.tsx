@@ -3,8 +3,16 @@ import { Send } from "lucide-react";
 import { useAuth, ROLE_META, ROLES, AuthUser } from "../context/AuthContext";
 import { useChatStore, ChatMessage, ChatMember } from "../store/useChatStore";
 import { useEmployer } from "../lib/store";
+import { API_HOST } from "../lib/api";
 
 const MENTION_RE = /@([A-Za-z0-9][A-Za-z0-9_-]*)/g;
+
+/** Mention token for a roster name — hyphen-normalized so multi-word names
+ * ("Software Developer" → @Software-Developer) survive the single-token
+ * mention regex on the backend (spaces would split into two mentions). */
+function mentionToken(username: string): string {
+  return username.replace(/\s+/g, "-");
+}
 
 /** Renders message text with highlighted @mentions. */
 function MentionText({ text, mentionNames }: { text: string; mentionNames: Set<string> }) {
@@ -40,6 +48,9 @@ function RoleBadge({ badge, color }: { badge: string; color: string }) {
   );
 }
 
+/** Swatch palette for the user highlight color picker. */
+const USER_COLORS = ["#00FF9D", "#6366F1", "#F59E0B", "#F472B6", "#38BDF8", "#A78BFA", "#F87171", "#CBD5E1"];
+
 export default function TeamChat() {
   const { user, login, switchRole, logout } = useAuth();
   const agents = useEmployer((s) => s.agents);
@@ -58,23 +69,30 @@ export default function TeamChat() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Roster for the sidebar: online humans + all AI agents (always available).
+  // Roster for the sidebar: online humans + ACTIVE AI agents only.
+  // An agent is active when it has an assigned model (own pin or its
+  // provider profile's default_model); inactive ones can't run, so they
+  // don't appear (mentioning them would queue a dead task).
   const roster: ChatMember[] = useMemo(() => {
-    const bots: ChatMember[] = agents.map((a) => ({
-      id: `agent_${a.id}`,
-      username: a.name,
-      role: "AI Agent",
-      badge: "BOT",
-      color: a.color,
-      kind: "bot" as const,
-      status: "online",
-    }));
+    const bots: ChatMember[] = agents
+      .filter((a) => Boolean(a.model))
+      .map((a) => ({
+        id: `agent_${a.id}`,
+        username: a.name,
+        role: "AI Agent",
+        badge: "BOT",
+        color: a.color,
+        kind: "bot" as const,
+        status: "online",
+      }));
     const humans = members.filter((m) => m.kind === "human");
     return [...humans, ...bots];
   }, [agents, members]);
 
+  // Normalized mention targets: roster names hyphen-normalized, so both
+  // "@Software-Developer" and the emitted mention tokens highlight correctly.
   const mentionNames = useMemo(
-    () => new Set(roster.map((r) => r.username)),
+    () => new Set(roster.map((r) => mentionToken(r.username))),
     [roster]
   );
 
@@ -87,7 +105,7 @@ export default function TeamChat() {
     const connect = () => {
       if (disposed) return;
       const proto = location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(`${proto}://${location.host}/api/chat/ws?token=${user.token}`);
+      const ws = new WebSocket(`${proto}://${API_HOST}/api/chat/ws?token=${user.token}`);
       wsRef.current = ws;
 
       ws.onopen = () => setWsStatus("open");
@@ -101,6 +119,11 @@ export default function TeamChat() {
           else removeMember(member.id);
         } else if (ev.type === "message") {
           const msg = ev as unknown as ChatMessage;
+          // Human echo of our own send — flag it so the thread can highlight.
+          if (msg.sender.kind === "human" && user &&
+              msg.sender.username.toLowerCase() === user.username.toLowerCase()) {
+            msg.mine = true;
+          }
           pushMessage(msg);
           const mentionsMe =
             user &&
@@ -153,7 +176,7 @@ export default function TeamChat() {
   };
 
   const applyMention = (name: string) => {
-    setDraft((d) => d.replace(/@([A-Za-z0-9_-]*)$/, `@${name} `));
+    setDraft((d) => d.replace(/@([A-Za-z0-9_-]*)$/, `@${mentionToken(name)} `));
     setMentionQuery(null);
     inputRef.current?.focus();
   };
@@ -280,26 +303,45 @@ export default function TeamChat() {
         >
           {messages.length === 0 && (
             <p className="text-xs text-text-muted">
-              No messages yet. Tag an agent with @ to get a live answer — e.g.{" "}
-              <span className="text-glow">@Software-Developer</span> (use the roster names).
+              No messages yet. Tag an active agent with @ to get a live answer — e.g.{" "}
+              <span className="text-glow">@Software-Developer</span> (only agents with an
+              assigned model are mentionable).
             </p>
           )}
-          {messages.map((m) => (
-            <div key={m.id} className="flex items-start gap-2">
-              <span className="text-[10px] text-text-muted mt-1 shrink-0 w-14 text-right">
-                {new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-              </span>
-              <RoleBadge badge={m.sender.badge} color={m.sender.color} />
-              <div className="min-w-0">
-                <span className="text-xs font-bold" style={{ color: m.sender.color }}>
-                  {m.sender.username}
+          {messages.map((m) => {
+            const isMine = m.mine === true;
+            const hi = isMine ? user.color || m.sender.color : m.sender.color;
+            return (
+              <div
+                key={m.id}
+                className={`flex items-start gap-2 rounded-lg px-2 py-1.5 -mx-2 border ${
+                  isMine ? "bg-inset" : "border-transparent"
+                }`}
+                style={
+                  isMine
+                    ? {
+                        borderColor: `${hi}66`,
+                        boxShadow: `inset 3px 0 0 ${hi}, 0 0 10px ${hi}22`,
+                      }
+                    : undefined
+                }
+              >
+                <span className="text-[10px] text-text-muted mt-1 shrink-0 w-14 text-right">
+                  {new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </span>
-                <div className="mt-0.5 text-sm leading-snug text-text-primary break-words">
-                  <MentionText text={m.text} mentionNames={mentionNames} />
+                <RoleBadge badge={m.sender.badge} color={hi} />
+                <div className="min-w-0">
+                  <span className="text-xs font-bold" style={{ color: hi }}>
+                    {m.sender.username}
+                    {isMine && <span className="ml-1.5 text-[10px] text-text-muted">(you)</span>}
+                  </span>
+                  <div className="mt-0.5 text-sm leading-snug text-text-primary break-words">
+                    <MentionText text={m.text} mentionNames={mentionNames} />
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Composer + autocomplete */}

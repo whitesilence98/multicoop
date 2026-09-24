@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Settings as SettingsIcon } from "lucide-react";
+import { Lock, Settings as SettingsIcon } from "lucide-react";
 import { useEmployer } from "./lib/store";
 import { useTaskStreams } from "./lib/useTaskStream";
 import TitleBar from "./components/TitleBar";
@@ -9,6 +9,7 @@ import TaskBoard from "./components/TaskBoard";
 import AgentTerminal from "./components/AgentTerminal";
 import TeamChat from "./components/TeamChat";
 import SettingsPanel from "./components/SettingsPanel";
+import { LOCK_EVENT } from "./components/LoginGate";
 
 type View = "dashboard" | "studio" | "board" | "terminal" | "chat";
 
@@ -43,6 +44,9 @@ export default function App() {
 
   // Live SSE for everything in flight
   useTaskStreams(tasks.filter((t) => t.status === "running" || t.status === "pending").map((t) => t.id));
+
+  /** Drop the session and re-show the LoginGate (see main.tsx). */
+  const lockApp = () => window.dispatchEvent(new Event(LOCK_EVENT));
 
   return (
     <div className="h-full flex flex-col">
@@ -83,6 +87,13 @@ export default function App() {
             title="API & Proxy settings"
           >
             <SettingsIcon size={16} />
+          </button>
+          <button
+            className="text-text-muted hover:text-neon transition-colors"
+            onClick={lockApp}
+            title="Lock the app"
+          >
+            <Lock size={16} />
           </button>
         </div>
       </header>

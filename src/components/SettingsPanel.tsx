@@ -17,6 +17,9 @@ const MODEL_OPTIONS = [
 
 const PROTOCOLS = ["http", "https", "socks5"] as const;
 
+/** Swatch palette for the user chat-highlight color. */
+const USER_COLORS = ["#00FF9D", "#6366F1", "#F59E0B", "#F472B6", "#38BDF8", "#A78BFA", "#F87171", "#CBD5E1"];
+
 function Label({ children }: { children: React.ReactNode }) {
   return (
     <div className="text-xs text-[#64748B] font-bold uppercase tracking-wider">
@@ -239,6 +242,48 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
+        {/* ---------- user identity ---------- */}
+        <div className="mt-5 rounded-lg border border-edge bg-inset p-3">
+          <div className="flex items-center justify-between">
+            <Label>Your Chat Highlight</Label>
+            <span
+              className="chip text-[10px]"
+              style={{
+                color: form.user_color,
+                borderColor: `${form.user_color}55`,
+                textShadow: `0 0 6px ${form.user_color}66`,
+              }}
+            >
+              preview
+            </span>
+          </div>
+          <p className="mt-1 text-[10px] text-text-muted">
+            Your name + messages glow in this color in Team Chat (applies at next chat sign-in).
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {USER_COLORS.map((c) => (
+              <button
+                key={c}
+                className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${
+                  form.user_color.toLowerCase() === c.toLowerCase()
+                    ? "border-white scale-110"
+                    : "border-transparent"
+                }`}
+                style={{ background: c, boxShadow: `0 0 8px ${c}88` }}
+                onClick={() => update({ user_color: c })}
+                title={c}
+              />
+            ))}
+            <input
+              type="color"
+              className="w-8 h-6 rounded cursor-pointer bg-transparent border border-edge-bright"
+              value={form.user_color}
+              onChange={(e) => update({ user_color: e.target.value })}
+              title="Custom color"
+            />
+          </div>
+        </div>
+
         {/* ---------- runtime defaults ---------- */}
         <div className="mt-6 grid grid-cols-3 gap-3">
           <div className="col-span-3">
@@ -254,9 +299,46 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <option key={m} value={m} />
               ))}
             </datalist>
+          </div>
+          <div>
+            <Label>Timeout (s)</Label>
+            <input
+              className="field w-full mt-1"
+              type="number"
+              min={5}
+              max={600}
+              value={form.timeout_seconds}
+              onChange={(e) => update({ timeout_seconds: Number(e.target.value) })}
+            />
+          </div>
+          <div>
+            <Label>Max Retries</Label>
+            <input
+              className="field w-full mt-1"
+              type="number"
+              min={0}
+              max={10}
+              value={form.max_retries}
+              onChange={(e) => update({ max_retries: Number(e.target.value) })}
+            />
+          </div>
+        </div>
 
+        {/* ---------- model catalog (separate panel) ---------- */}
+        <details className="mt-5 rounded-lg border border-edge bg-inset p-3" open={models.length > 0}>
+          <summary className="flex items-center gap-2 cursor-pointer select-none list-none">
+            <Label>Model Catalog</Label>
+            <span className="chip text-[10px] text-text-muted border-edge-bright">
+              {form.added_models.length} pinned
+            </span>
+            <span className="ml-auto text-[10px] text-text-muted normal-case">
+              click to expand
+            </span>
+          </summary>
+
+          <div className="mt-3 space-y-3">
             {/* ---- fetch action row ---- */}
-            <div className="flex items-center gap-3 mt-2">
+            <div className="flex items-center gap-3">
               <button
                 className="flex items-center gap-1.5 text-xs uppercase tracking-wider font-bold text-text-muted hover:text-neon transition-colors disabled:opacity-40"
                 onClick={fetchModels}
@@ -281,7 +363,7 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
 
             {/* ---- fetched catalog: click a chip to add it ---- */}
             {models.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+              <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
                 {models.map((m) => {
                   const added = form.added_models.includes(m);
                   return (
@@ -304,7 +386,7 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
 
             {/* ---- added-models chips ---- */}
             {form.added_models.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-1.5">
                 {form.added_models.map((m) => (
                   <span
                     key={m}
@@ -324,7 +406,7 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
             )}
 
             {/* ---- manual add (for offline endpoints) ---- */}
-            <div className="mt-2 flex gap-2">
+            <div className="flex gap-2">
               <input
                 className="field flex-1 text-xs"
                 placeholder="add model manually (e.g. qwen3.5:397b)…"
@@ -350,29 +432,7 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
               </button>
             </div>
           </div>
-          <div>
-            <Label>Timeout (s)</Label>
-            <input
-              className="field w-full mt-1"
-              type="number"
-              min={5}
-              max={600}
-              value={form.timeout_seconds}
-              onChange={(e) => update({ timeout_seconds: Number(e.target.value) })}
-            />
-          </div>
-          <div>
-            <Label>Max Retries</Label>
-            <input
-              className="field w-full mt-1"
-              type="number"
-              min={0}
-              max={10}
-              value={form.max_retries}
-              onChange={(e) => update({ max_retries: Number(e.target.value) })}
-            />
-          </div>
-        </div>
+        </details>
 
         {/* ---------- diagnostics ---------- */}
         <div className="mt-6 flex items-center gap-3">

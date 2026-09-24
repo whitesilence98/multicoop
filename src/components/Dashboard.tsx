@@ -94,6 +94,9 @@ export default function Dashboard() {
         ) : (
           <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             {agents.map((a) => {
+              // Active = has an assigned model (own pin or provider default);
+              // glowing border only when actually executing a task.
+              const isActiveAgent = Boolean(a.model);
               const active = running.some((t) => t.agent_id === a.id);
               return (
                 <div
@@ -105,7 +108,10 @@ export default function Dashboard() {
                   <div className="flex items-center gap-2">
                     <span
                       className="w-2 h-2 rounded-full"
-                      style={{ background: a.color, boxShadow: `0 0 6px ${a.color}` }}
+                      style={{
+                        background: isActiveAgent ? a.color : "#2A2F45",
+                        boxShadow: isActiveAgent ? `0 0 6px ${a.color}` : "none",
+                      }}
                     />
                     <span className="font-bold text-sm text-text-primary">{a.name}</span>
                     <span className="chip ml-auto text-text-muted border-edge-bright">
@@ -115,10 +121,12 @@ export default function Dashboard() {
                   <div className="mt-2 text-xs uppercase tracking-wider text-text-muted">
                     {active ? (
                       <span className="text-glow">● executing</span>
+                    ) : isActiveAgent ? (
+                      <span className="text-neon">○ active</span>
                     ) : (
-                      <span>○ idle</span>
+                      <span className="text-warn">○ inactive — no model</span>
                     )}
-                    <span className="ml-3">tools: {a.allowed_tools.length}</span>
+                    <span className="ml-3">{a.model || "no model"}</span>
                   </div>
                 </div>
               );

@@ -1,5 +1,13 @@
 /** Typed client for the FastAPI orchestrator. */
 
+/** API origin. Dev: Vite proxies /api to the sidecar. Packaged Electron
+ * (file:// protocol): location.host is empty, so talk to the sidecar's
+ * port directly. */
+export const API_HOST =
+  location.protocol === "http:" || location.protocol === "https:"
+    ? location.host
+    : "127.0.0.1:8737";
+
 export interface Agent {
   id: number;
   name: string;
@@ -44,7 +52,13 @@ export interface Metrics {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  // Dev (http): relative path goes through the Vite proxy. Packaged
+  // Electron (file://): talk to the sidecar port directly.
+  const base =
+    location.protocol === "http:" || location.protocol === "https:"
+      ? "/api"
+      : `http://${API_HOST}/api`;
+  const res = await fetch(`${base}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
@@ -114,4 +128,28 @@ export const api = {
       "/agents/claude/import",
       { method: "POST", body: JSON.stringify({}) }
     ),
+
+  // App lock (password gate for the UI; see components/LoginGate.tsx)
+  authStatus: () =>
+    req<{ configured: boolean }>("/auth/status", { method: "POST", body: JSON.stringify({}) }),
+  authSetup: (password: string) =>
+    req<{ configured: boolean }>("/auth/setup", {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    }),
+  authLogin: (password: string) =>
+    req<{ token: string }>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    }),
+  authValidate: (token: string) =>
+    req<{ valid: boolean }>("/auth/validate", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+  authLogout: (token: string) =>
+    req<{ valid: boolean }>("/auth/logout", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
 };

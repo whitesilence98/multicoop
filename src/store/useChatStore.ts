@@ -16,6 +16,8 @@ export interface ChatMessage {
   text: string;
   mentions: string[];
   ts: string;
+  /** Set when this message is from the local user — rendered with highlight. */
+  mine?: boolean;
 }
 
 interface ChatState {

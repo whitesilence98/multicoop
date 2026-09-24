@@ -14,6 +14,9 @@ export default defineConfig({
       "/api": {
         target: "http://127.0.0.1:8737",
         changeOrigin: true,
+        // Team chat runs over WebSockets (/api/chat/ws) — without ws:true
+        // the dev server swallows the upgrade request and chat never connects.
+        ws: true,
       },
     },
   },
